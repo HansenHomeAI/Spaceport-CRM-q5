@@ -6,7 +6,7 @@ import { SpaceportCrmStack } from "../lib/spaceport-crm-stack"
 const app = new cdk.App()
 new SpaceportCrmStack(app, "SpaceportCrmStack", {
   env: {
-    account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION,
+    account: "975050048887",
+    region: "us-west-2",
   },
 })
