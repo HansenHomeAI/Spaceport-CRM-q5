@@ -9,4 +9,5 @@ new SpaceportCrmStack(app, "SpaceportCrmStack", {
     account: "975050048887",
     region: "us-west-2",
   },
+  description: "Spaceport CRM Backend Infrastructure",
 })

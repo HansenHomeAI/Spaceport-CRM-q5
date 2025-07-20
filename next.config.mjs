@@ -11,7 +11,10 @@ const nextConfig = {
   images: {
     unoptimized: true
   },
-  // Removed basePath and assetPrefix for cleaner deployment
+  assetPrefix: process.env.NODE_ENV === 'production' ? '' : '',
+  experimental: {
+    esmExternals: false
+  }
 }
 
 export default nextConfig

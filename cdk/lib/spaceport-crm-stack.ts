@@ -3,6 +3,7 @@ import * as dynamodb from "aws-cdk-lib/aws-dynamodb"
 import * as lambda from "aws-cdk-lib/aws-lambda"
 import * as apigateway from "aws-cdk-lib/aws-apigateway"
 import * as cognito from "aws-cdk-lib/aws-cognito"
+import * as iam from "aws-cdk-lib/aws-iam"
 import type { Construct } from "constructs"
 
 export class SpaceportCrmStack extends cdk.Stack {
@@ -15,6 +16,7 @@ export class SpaceportCrmStack extends cdk.Stack {
       partitionKey: { name: "id", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+      pointInTimeRecovery: true,
     })
 
     const activitiesTable = new dynamodb.Table(this, "ActivitiesTable", {
@@ -23,6 +25,7 @@ export class SpaceportCrmStack extends cdk.Stack {
       sortKey: { name: "timestamp", type: dynamodb.AttributeType.NUMBER },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+      pointInTimeRecovery: true,
     })
 
     // Add GSI for querying activities by lead ID
@@ -68,66 +71,85 @@ export class SpaceportCrmStack extends cdk.Stack {
       },
     })
 
+    // Lambda execution role
+    const lambdaRole = new iam.Role(this, "LambdaExecutionRole", {
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+      managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole")],
+    })
+
     // Lambda Functions
     const leadsLambda = new lambda.Function(this, "LeadsFunction", {
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: "index.handler",
+      role: lambdaRole,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
       code: lambda.Code.fromInline(`
         const AWS = require('aws-sdk');
         const dynamodb = new AWS.DynamoDB.DocumentClient();
         
+        const corsHeaders = {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+        };
+        
         exports.handler = async (event) => {
-          const headers = {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-          };
+          console.log('Event:', JSON.stringify(event, null, 2));
           
           if (event.httpMethod === 'OPTIONS') {
-            return { statusCode: 200, headers };
+            return { 
+              statusCode: 200, 
+              headers: corsHeaders,
+              body: JSON.stringify({ message: 'CORS preflight' })
+            };
           }
           
           try {
             const { httpMethod, pathParameters, body } = event;
+            const leadsTableName = process.env.LEADS_TABLE_NAME;
             
             switch (httpMethod) {
               case 'GET':
                 if (pathParameters && pathParameters.id) {
                   // Get single lead
                   const result = await dynamodb.get({
-                    TableName: '${leadsTable.tableName}',
+                    TableName: leadsTableName,
                     Key: { id: pathParameters.id }
                   }).promise();
+                  
                   return {
                     statusCode: 200,
-                    headers,
-                    body: JSON.stringify(result.Item)
+                    headers: corsHeaders,
+                    body: JSON.stringify(result.Item || null)
                   };
                 } else {
                   // Get all leads
                   const result = await dynamodb.scan({
-                    TableName: '${leadsTable.tableName}'
+                    TableName: leadsTableName
                   }).promise();
+                  
                   return {
                     statusCode: 200,
-                    headers,
-                    body: JSON.stringify(result.Items)
+                    headers: corsHeaders,
+                    body: JSON.stringify(result.Items || [])
                   };
                 }
               
               case 'POST':
                 const newLead = JSON.parse(body);
-                newLead.id = Date.now().toString();
+                newLead.id = \`lead_\${Date.now()}_\${Math.random().toString(36).substr(2, 9)}\`;
                 newLead.createdAt = new Date().toISOString();
+                newLead.updatedAt = new Date().toISOString();
                 
                 await dynamodb.put({
-                  TableName: '${leadsTable.tableName}',
+                  TableName: leadsTableName,
                   Item: newLead
                 }).promise();
                 
                 return {
                   statusCode: 201,
-                  headers,
+                  headers: corsHeaders,
                   body: JSON.stringify(newLead)
                 };
               
@@ -136,31 +158,40 @@ export class SpaceportCrmStack extends cdk.Stack {
                 updatedLead.updatedAt = new Date().toISOString();
                 
                 await dynamodb.put({
-                  TableName: '${leadsTable.tableName}',
+                  TableName: leadsTableName,
                   Item: updatedLead
                 }).promise();
                 
                 return {
                   statusCode: 200,
-                  headers,
+                  headers: corsHeaders,
                   body: JSON.stringify(updatedLead)
                 };
               
               case 'DELETE':
+                if (!pathParameters || !pathParameters.id) {
+                  return {
+                    statusCode: 400,
+                    headers: corsHeaders,
+                    body: JSON.stringify({ error: 'Lead ID is required' })
+                  };
+                }
+                
                 await dynamodb.delete({
-                  TableName: '${leadsTable.tableName}',
+                  TableName: leadsTableName,
                   Key: { id: pathParameters.id }
                 }).promise();
                 
                 return {
                   statusCode: 204,
-                  headers
+                  headers: corsHeaders,
+                  body: ''
                 };
               
               default:
                 return {
                   statusCode: 405,
-                  headers,
+                  headers: corsHeaders,
                   body: JSON.stringify({ error: 'Method not allowed' })
                 };
             }
@@ -168,8 +199,11 @@ export class SpaceportCrmStack extends cdk.Stack {
             console.error('Error:', error);
             return {
               statusCode: 500,
-              headers,
-              body: JSON.stringify({ error: 'Internal server error' })
+              headers: corsHeaders,
+              body: JSON.stringify({ 
+                error: 'Internal server error',
+                message: error.message 
+              })
             };
           }
         };
@@ -183,30 +217,40 @@ export class SpaceportCrmStack extends cdk.Stack {
     const activitiesLambda = new lambda.Function(this, "ActivitiesFunction", {
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: "index.handler",
+      role: lambdaRole,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
       code: lambda.Code.fromInline(`
         const AWS = require('aws-sdk');
         const dynamodb = new AWS.DynamoDB.DocumentClient();
         
+        const corsHeaders = {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+        };
+        
         exports.handler = async (event) => {
-          const headers = {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
-          };
+          console.log('Event:', JSON.stringify(event, null, 2));
           
           if (event.httpMethod === 'OPTIONS') {
-            return { statusCode: 200, headers };
+            return { 
+              statusCode: 200, 
+              headers: corsHeaders,
+              body: JSON.stringify({ message: 'CORS preflight' })
+            };
           }
           
           try {
             const { httpMethod, queryStringParameters, body } = event;
+            const activitiesTableName = process.env.ACTIVITIES_TABLE_NAME;
             
             switch (httpMethod) {
               case 'GET':
                 if (queryStringParameters && queryStringParameters.leadId) {
                   // Get activities for a specific lead
                   const result = await dynamodb.query({
-                    TableName: '${activitiesTable.tableName}',
+                    TableName: activitiesTableName,
                     IndexName: 'LeadIdIndex',
                     KeyConditionExpression: 'leadId = :leadId',
                     ExpressionAttributeValues: {
@@ -214,44 +258,46 @@ export class SpaceportCrmStack extends cdk.Stack {
                     },
                     ScanIndexForward: false // Most recent first
                   }).promise();
+                  
                   return {
                     statusCode: 200,
-                    headers,
-                    body: JSON.stringify(result.Items)
+                    headers: corsHeaders,
+                    body: JSON.stringify(result.Items || [])
                   };
                 } else {
                   // Get all activities
                   const result = await dynamodb.scan({
-                    TableName: '${activitiesTable.tableName}'
+                    TableName: activitiesTableName
                   }).promise();
+                  
                   return {
                     statusCode: 200,
-                    headers,
-                    body: JSON.stringify(result.Items)
+                    headers: corsHeaders,
+                    body: JSON.stringify(result.Items || [])
                   };
                 }
               
               case 'POST':
                 const newActivity = JSON.parse(body);
-                newActivity.id = Date.now().toString();
+                newActivity.id = \`activity_\${Date.now()}_\${Math.random().toString(36).substr(2, 9)}\`;
                 newActivity.timestamp = Date.now();
                 newActivity.createdAt = new Date().toISOString();
                 
                 await dynamodb.put({
-                  TableName: '${activitiesTable.tableName}',
+                  TableName: activitiesTableName,
                   Item: newActivity
                 }).promise();
                 
                 return {
                   statusCode: 201,
-                  headers,
+                  headers: corsHeaders,
                   body: JSON.stringify(newActivity)
                 };
               
               default:
                 return {
                   statusCode: 405,
-                  headers,
+                  headers: corsHeaders,
                   body: JSON.stringify({ error: 'Method not allowed' })
                 };
             }
@@ -259,8 +305,11 @@ export class SpaceportCrmStack extends cdk.Stack {
             console.error('Error:', error);
             return {
               statusCode: 500,
-              headers,
-              body: JSON.stringify({ error: 'Internal server error' })
+              headers: corsHeaders,
+              body: JSON.stringify({ 
+                error: 'Internal server error',
+                message: error.message 
+              })
             };
           }
         };
@@ -283,7 +332,14 @@ export class SpaceportCrmStack extends cdk.Stack {
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
-        allowHeaders: ["Content-Type", "Authorization"],
+        allowHeaders: ["Content-Type", "Authorization", "X-Amz-Date", "X-Api-Key", "X-Amz-Security-Token"],
+      },
+      deployOptions: {
+        stageName: "prod",
+        throttle: {
+          rateLimit: 1000,
+          burstLimit: 2000,
+        },
       },
     })
 
@@ -292,35 +348,64 @@ export class SpaceportCrmStack extends cdk.Stack {
     const leadResource = leadsResource.addResource("{id}")
     const activitiesResource = api.root.addResource("activities")
 
-    // API Methods
-    leadsResource.addMethod("GET", new apigateway.LambdaIntegration(leadsLambda))
-    leadsResource.addMethod("POST", new apigateway.LambdaIntegration(leadsLambda))
-    leadResource.addMethod("GET", new apigateway.LambdaIntegration(leadsLambda))
-    leadResource.addMethod("PUT", new apigateway.LambdaIntegration(leadsLambda))
-    leadResource.addMethod("DELETE", new apigateway.LambdaIntegration(leadsLambda))
+    // API Methods with proper CORS
+    const methodOptions = {
+      methodResponses: [
+        {
+          statusCode: "200",
+          responseHeaders: {
+            "Access-Control-Allow-Origin": true,
+            "Access-Control-Allow-Headers": true,
+            "Access-Control-Allow-Methods": true,
+          },
+        },
+      ],
+    }
 
-    activitiesResource.addMethod("GET", new apigateway.LambdaIntegration(activitiesLambda))
-    activitiesResource.addMethod("POST", new apigateway.LambdaIntegration(activitiesLambda))
+    leadsResource.addMethod("GET", new apigateway.LambdaIntegration(leadsLambda), methodOptions)
+    leadsResource.addMethod("POST", new apigateway.LambdaIntegration(leadsLambda), methodOptions)
+    leadResource.addMethod("GET", new apigateway.LambdaIntegration(leadsLambda), methodOptions)
+    leadResource.addMethod("PUT", new apigateway.LambdaIntegration(leadsLambda), methodOptions)
+    leadResource.addMethod("DELETE", new apigateway.LambdaIntegration(leadsLambda), methodOptions)
+
+    activitiesResource.addMethod("GET", new apigateway.LambdaIntegration(activitiesLambda), methodOptions)
+    activitiesResource.addMethod("POST", new apigateway.LambdaIntegration(activitiesLambda), methodOptions)
 
     // Outputs
     new cdk.CfnOutput(this, "ApiUrl", {
       value: api.url,
       description: "API Gateway URL",
+      exportName: "SpaceportCrmApiUrl",
     })
 
     new cdk.CfnOutput(this, "UserPoolId", {
       value: userPool.userPoolId,
       description: "Cognito User Pool ID",
+      exportName: "SpaceportCrmUserPoolId",
     })
 
     new cdk.CfnOutput(this, "UserPoolClientId", {
       value: userPoolClient.userPoolClientId,
       description: "Cognito User Pool Client ID",
+      exportName: "SpaceportCrmUserPoolClientId",
     })
 
     new cdk.CfnOutput(this, "Region", {
       value: this.region,
       description: "AWS Region",
+      exportName: "SpaceportCrmRegion",
+    })
+
+    new cdk.CfnOutput(this, "LeadsTableName", {
+      value: leadsTable.tableName,
+      description: "DynamoDB Leads Table Name",
+      exportName: "SpaceportCrmLeadsTable",
+    })
+
+    new cdk.CfnOutput(this, "ActivitiesTableName", {
+      value: activitiesTable.tableName,
+      description: "DynamoDB Activities Table Name",
+      exportName: "SpaceportCrmActivitiesTable",
     })
   }
 }
