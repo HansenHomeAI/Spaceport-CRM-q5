@@ -77,7 +77,7 @@ export class SpaceportCrmStack extends cdk.Stack {
       managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole")],
     })
 
-    // Lambda Functions
+    // Lambda Functions with enhanced user attribution
     const leadsLambda = new lambda.Function(this, "LeadsFunction", {
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: "index.handler",
@@ -94,6 +94,26 @@ export class SpaceportCrmStack extends cdk.Stack {
           'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
         };
         
+        // Helper function to extract user info from JWT token
+        function getUserFromToken(authHeader) {
+          if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return null;
+          }
+          
+          try {
+            const token = authHeader.substring(7);
+            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+            return {
+              id: payload.sub,
+              email: payload.email,
+              name: payload.name || payload.email?.split('@')[0] || 'User'
+            };
+          } catch (error) {
+            console.error('Error parsing token:', error);
+            return null;
+          }
+        }
+        
         exports.handler = async (event) => {
           console.log('Event:', JSON.stringify(event, null, 2));
           
@@ -106,8 +126,9 @@ export class SpaceportCrmStack extends cdk.Stack {
           }
           
           try {
-            const { httpMethod, pathParameters, body } = event;
+            const { httpMethod, pathParameters, body, headers } = event;
             const leadsTableName = process.env.LEADS_TABLE_NAME;
+            const user = getUserFromToken(headers.Authorization || headers.authorization);
             
             switch (httpMethod) {
               case 'GET':
@@ -141,6 +162,13 @@ export class SpaceportCrmStack extends cdk.Stack {
                 newLead.id = \`lead_\${Date.now()}_\${Math.random().toString(36).substr(2, 9)}\`;
                 newLead.createdAt = new Date().toISOString();
                 newLead.updatedAt = new Date().toISOString();
+                newLead.notes = newLead.notes || [];
+                
+                // Add user attribution
+                if (user) {
+                  newLead.createdBy = user.id;
+                  newLead.createdByName = user.name;
+                }
                 
                 await dynamodb.put({
                   TableName: leadsTableName,
@@ -156,6 +184,12 @@ export class SpaceportCrmStack extends cdk.Stack {
               case 'PUT':
                 const updatedLead = JSON.parse(body);
                 updatedLead.updatedAt = new Date().toISOString();
+                
+                // Add user attribution for updates
+                if (user) {
+                  updatedLead.lastUpdatedBy = user.id;
+                  updatedLead.lastUpdatedByName = user.name;
+                }
                 
                 await dynamodb.put({
                   TableName: leadsTableName,
@@ -211,6 +245,7 @@ export class SpaceportCrmStack extends cdk.Stack {
       environment: {
         LEADS_TABLE_NAME: leadsTable.tableName,
         ACTIVITIES_TABLE_NAME: activitiesTable.tableName,
+        USER_POOL_ID: userPool.userPoolId,
       },
     })
 
@@ -230,6 +265,26 @@ export class SpaceportCrmStack extends cdk.Stack {
           'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
         };
         
+        // Helper function to extract user info from JWT token
+        function getUserFromToken(authHeader) {
+          if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return null;
+          }
+          
+          try {
+            const token = authHeader.substring(7);
+            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+            return {
+              id: payload.sub,
+              email: payload.email,
+              name: payload.name || payload.email?.split('@')[0] || 'User'
+            };
+          } catch (error) {
+            console.error('Error parsing token:', error);
+            return null;
+          }
+        }
+        
         exports.handler = async (event) => {
           console.log('Event:', JSON.stringify(event, null, 2));
           
@@ -242,8 +297,9 @@ export class SpaceportCrmStack extends cdk.Stack {
           }
           
           try {
-            const { httpMethod, queryStringParameters, body } = event;
+            const { httpMethod, queryStringParameters, body, headers } = event;
             const activitiesTableName = process.env.ACTIVITIES_TABLE_NAME;
+            const user = getUserFromToken(headers.Authorization || headers.authorization);
             
             switch (httpMethod) {
               case 'GET':
@@ -283,6 +339,12 @@ export class SpaceportCrmStack extends cdk.Stack {
                 newActivity.timestamp = Date.now();
                 newActivity.createdAt = new Date().toISOString();
                 
+                // Add user attribution
+                if (user) {
+                  newActivity.createdBy = user.id;
+                  newActivity.createdByName = user.name;
+                }
+                
                 await dynamodb.put({
                   TableName: activitiesTableName,
                   Item: newActivity
@@ -317,6 +379,7 @@ export class SpaceportCrmStack extends cdk.Stack {
       environment: {
         LEADS_TABLE_NAME: leadsTable.tableName,
         ACTIVITIES_TABLE_NAME: activitiesTable.tableName,
+        USER_POOL_ID: userPool.userPoolId,
       },
     })
 
@@ -325,7 +388,7 @@ export class SpaceportCrmStack extends cdk.Stack {
     activitiesTable.grantReadWriteData(leadsLambda)
     activitiesTable.grantReadWriteData(activitiesLambda)
 
-    // API Gateway
+    // API Gateway with Cognito Authorizer
     const api = new apigateway.RestApi(this, "SpaceportCrmApi", {
       restApiName: "Spaceport CRM API",
       description: "API for Spaceport CRM application",
@@ -343,13 +406,21 @@ export class SpaceportCrmStack extends cdk.Stack {
       },
     })
 
+    // Cognito Authorizer
+    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, "CognitoAuthorizer", {
+      cognitoUserPools: [userPool],
+      identitySource: "method.request.header.Authorization",
+    })
+
     // API Resources
     const leadsResource = api.root.addResource("leads")
     const leadResource = leadsResource.addResource("{id}")
     const activitiesResource = api.root.addResource("activities")
 
-    // API Methods with proper CORS
+    // API Methods with Cognito authorization
     const methodOptions = {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
       methodResponses: [
         {
           statusCode: "200",

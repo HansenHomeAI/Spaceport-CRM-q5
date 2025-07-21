@@ -1,250 +1,359 @@
 "use client"
 
-import { useState } from "react"
-import { motion } from "framer-motion"
-import { Plus, Upload, Clock, Info } from "lucide-react"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { MetricCards } from "@/components/metric-cards"
-import { LeadsTable, type Lead } from "@/components/leads-table"
+import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Badge } from "@/components/ui/badge"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Search, Plus, Filter, Download, Upload, LogOut, Loader2 } from "lucide-react"
+import { useAuth } from "@/lib/auth-context"
+import { apiClient, type Lead, type Activity } from "@/lib/api-client"
+import { LeadsTable } from "@/components/leads-table"
 import { LeadPanel } from "@/components/lead-panel"
 import { AddLeadModal } from "@/components/add-lead-modal"
+import { CsvImport } from "@/components/csv-import"
+import { MetricCards } from "@/components/metric-cards"
 import { FollowUpPriority } from "@/components/follow-up-priority"
-import { useAuth } from "@/lib/auth-context"
-import { CSVImport } from "@/components/csv-import"
 
-// Enhanced mock data with addresses and more interaction history
-const mockLeads: Lead[] = [
-  {
-    id: "1",
-    name: "John Smith",
-    phone: "+1 (555) 123-4567",
-    email: "john.smith@techcorp.com",
-    address: "1234 Maple Street, Beverly Hills, CA 90210",
-    status: "interested",
-    lastInteraction: "2024-01-15",
-    notes: [
-      {
-        id: "1",
-        text: "Initial contact made, showed strong interest in our enterprise solution",
-        timestamp: "2024-01-15T10:00:00Z",
-        type: "call",
-      },
-      {
-        id: "2",
-        text: "Sent product demo video and pricing information",
-        timestamp: "2024-01-14T14:30:00Z",
-        type: "email",
-      },
-    ],
-  },
-  {
-    id: "2",
-    name: "Sarah Johnson",
-    phone: "+1 (555) 987-6543",
-    email: "sarah.johnson@innovate.eu",
-    address: "5678 Oak Avenue, Manhattan, NY 10001",
-    status: "contacted",
-    lastInteraction: "2024-01-10",
-    notes: [
-      {
-        id: "3",
-        text: "Left voicemail, awaiting callback",
-        timestamp: "2024-01-10T09:15:00Z",
-        type: "call",
-      },
-    ],
-  },
-  {
-    id: "3",
-    name: "Mike Davis",
-    phone: "+1 (555) 456-7890",
-    email: "mike.davis@startupxyz.com",
-    address: "9012 Pine Road, Austin, TX 78701",
-    status: "cold",
-    lastInteraction: "2024-01-05",
-    notes: [],
-  },
-  {
-    id: "4",
-    name: "Emily Chen",
-    phone: "+1 (555) 321-9876",
-    email: "emily.chen@globaltech.com",
-    address: "3456 Cedar Lane, San Francisco, CA 94102",
-    status: "closed",
-    lastInteraction: "2024-01-12",
-    notes: [
-      {
-        id: "4",
-        text: "Deal closed! Signed annual contract for $50k",
-        timestamp: "2024-01-12T16:45:00Z",
-        type: "note",
-      },
-      {
-        id: "5",
-        text: "Final negotiation call - agreed on terms",
-        timestamp: "2024-01-11T11:30:00Z",
-        type: "call",
-      },
-    ],
-  },
-  {
-    id: "5",
-    name: "Robert Wilson",
-    phone: "+1 (555) 654-3210",
-    email: "robert.wilson@manufacturing.com",
-    address: "7890 Elm Street, Chicago, IL 60601",
-    status: "contacted",
-    lastInteraction: "2024-01-08",
-    notes: [
-      {
-        id: "6",
-        text: "Interested in pilot program, scheduling demo for next week",
-        timestamp: "2024-01-08T13:20:00Z",
-        type: "email",
-      },
-    ],
-  },
-]
+export default function Dashboard() {
+  const router = useRouter()
+  const { user, signOut } = useAuth()
 
-export default function DashboardPage() {
-  const { user } = useAuth()
-  const [leads, setLeads] = useState<Lead[]>(mockLeads)
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [activities, setActivities] = useState<Activity[]>([])
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
-  const [isPanelOpen, setIsPanelOpen] = useState(false)
-  const [isImportOpen, setIsImportOpen] = useState(false)
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-  const [sortByRecent, setSortByRecent] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [isAddLeadOpen, setIsAddLeadOpen] = useState(false)
+  const [isCsvImportOpen, setIsCsvImportOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Calculate metrics
-  const callsMade = leads.reduce((acc, lead) => acc + lead.notes.filter((note) => note.type === "call").length, 0)
-  const responsesReceived = leads.filter((lead) => lead.status === "interested" || lead.status === "closed").length
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!user) {
+      router.push("/login")
+    }
+  }, [user, router])
 
-  // Mock weekly data for charts
-  const weeklyData = {
-    calls: [12, 15, 8, 22, 18, 25, callsMade],
-    responses: [3, 5, 2, 8, 6, 9, responsesReceived],
-    labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Today"],
+  // Set up API client with user token
+  useEffect(() => {
+    if (user?.accessToken) {
+      apiClient.setAccessToken(user.accessToken)
+    }
+  }, [user])
+
+  // Load initial data
+  useEffect(() => {
+    if (user) {
+      loadData()
+    }
+  }, [user])
+
+  const loadData = async () => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const [leadsResult, activitiesResult] = await Promise.all([apiClient.getLeads(), apiClient.getActivities()])
+
+      if (leadsResult.error) {
+        console.error("Failed to load leads:", leadsResult.error)
+        // Fallback to demo data if API fails
+        setLeads([
+          {
+            id: "1",
+            name: "John Doe",
+            email: "john@example.com",
+            phone: "+1 (555) 123-4567",
+            company: "Acme Corp",
+            status: "new",
+            source: "Website",
+            value: 50000,
+            notes: ["Initial contact made", "Interested in enterprise plan"],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            createdByName: "Demo User",
+          },
+        ])
+      } else {
+        setLeads(leadsResult.data || [])
+      }
+
+      if (activitiesResult.error) {
+        console.error("Failed to load activities:", activitiesResult.error)
+        setActivities([])
+      } else {
+        setActivities(activitiesResult.data || [])
+      }
+
+      if (leadsResult.error || activitiesResult.error) {
+        setError("Some data could not be loaded. Using demo data where available.")
+      }
+    } catch (error) {
+      console.error("Error loading data:", error)
+      setError("Failed to load data. Please check your connection.")
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleLeadUpdate = (leadId: string, updates: Partial<Lead>) => {
-    setLeads((prev) => prev.map((lead) => (lead.id === leadId ? { ...lead, ...updates } : lead)))
+  const handleAddLead = async (leadData: Omit<Lead, "id" | "createdAt" | "updatedAt">) => {
+    const { data, error } = await apiClient.createLead(leadData)
 
-    // Update selected lead if it's the same one
+    if (error) {
+      console.error("Failed to create lead:", error)
+      return { success: false, message: error }
+    }
+
+    if (data) {
+      setLeads((prev) => [data, ...prev])
+      setIsAddLeadOpen(false)
+      return { success: true, message: "Lead created successfully!" }
+    }
+
+    return { success: false, message: "Unknown error occurred" }
+  }
+
+  const handleUpdateLead = async (updatedLead: Lead) => {
+    const { data, error } = await apiClient.updateLead(updatedLead)
+
+    if (error) {
+      console.error("Failed to update lead:", error)
+      return
+    }
+
+    if (data) {
+      setLeads((prev) => prev.map((lead) => (lead.id === data.id ? data : lead)))
+      setSelectedLead(data)
+    }
+  }
+
+  const handleDeleteLead = async (leadId: string) => {
+    const { error } = await apiClient.deleteLead(leadId)
+
+    if (error) {
+      console.error("Failed to delete lead:", error)
+      return
+    }
+
+    setLeads((prev) => prev.filter((lead) => lead.id !== leadId))
     if (selectedLead?.id === leadId) {
-      setSelectedLead((prev) => (prev ? { ...prev, ...updates } : null))
+      setSelectedLead(null)
     }
   }
 
-  const handleLeadSelect = (lead: Lead) => {
-    setSelectedLead(lead)
-    setIsPanelOpen(true)
-  }
+  const handleAddActivity = async (activity: Omit<Activity, "id" | "timestamp" | "createdAt">) => {
+    const { data, error } = await apiClient.createActivity(activity)
 
-  const handleAddNote = (leadId: string, note: { text: string; type: "call" | "email" | "note" }) => {
-    const newNote = {
-      id: Date.now().toString(),
-      ...note,
-      timestamp: new Date().toISOString(),
+    if (error) {
+      console.error("Failed to create activity:", error)
+      return
     }
 
-    setLeads((prev) => prev.map((lead) => (lead.id === leadId ? { ...lead, notes: [...lead.notes, newNote] } : lead)))
-
-    // Update selected lead if it's the same one
-    if (selectedLead?.id === leadId) {
-      setSelectedLead((prev) => (prev ? { ...prev, notes: [...prev.notes, newNote] } : null))
+    if (data) {
+      setActivities((prev) => [data, ...prev])
     }
   }
 
-  const handleCSVImport = (importedLeads: Lead[]) => {
-    setLeads((prev) => [...prev, ...importedLeads])
+  const handleCsvImport = async (importedLeads: Omit<Lead, "id" | "createdAt" | "updatedAt">[]) => {
+    const { data, error } = await apiClient.createLeads(importedLeads)
+
+    if (error) {
+      console.error("CSV import failed:", error)
+      return { success: false, message: error }
+    }
+
+    if (data) {
+      setLeads((prev) => [...data, ...prev])
+      setIsCsvImportOpen(false)
+      return { success: true, message: `Successfully imported ${data.length} leads!` }
+    }
+
+    return { success: false, message: "Unknown error occurred" }
   }
 
-  const handleAddLead = (leadData: Omit<Lead, "id" | "notes">) => {
-    const newLead: Lead = {
-      ...leadData,
-      id: Date.now().toString(),
-      notes: [],
-    }
-    setLeads((prev) => [...prev, newLead])
+  const handleSignOut = () => {
+    signOut()
+    router.push("/login")
+  }
+
+  const filteredLeads = leads.filter(
+    (lead) =>
+      lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      lead.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      lead.company?.toLowerCase().includes(searchTerm.toLowerCase()),
+  )
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-black p-6">
-      <div className="max-w-7xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="flex items-center justify-between mb-8"
-        >
-          <div>
-            <h1 className="text-3xl font-title text-primary-hierarchy mb-2">Welcome back, {user?.name}</h1>
-            <p className="text-medium-hierarchy font-body">Here's what's happening with your leads today.</p>
-          </div>
-          <div className="flex gap-3">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() => setSortByRecent(!sortByRecent)}
-                    variant="outline"
-                    className={`border-system text-medium-hierarchy hover:bg-white/10 rounded-full px-6 backdrop-blur-sm font-body ${
-                      sortByRecent ? "bg-purple-500/10 text-purple-300" : ""
-                    }`}
-                  >
-                    <Clock className="h-4 w-4 mr-2" />
-                    {sortByRecent ? "Recent First" : "Sort by Recent"}
-                    <Info className="h-3 w-3 ml-1 opacity-50" />
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200">
+        <div className="px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <h1 className="text-2xl font-bold text-gray-900">Spaceport CRM</h1>
+              <Badge variant="secondary">Production</Badge>
+            </div>
+
+            <div className="flex items-center space-x-4">
+              <span className="text-sm text-gray-600">Welcome, {user.name}</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src="/placeholder-user.jpg" alt={user.name} />
+                      <AvatarFallback>{user.name.charAt(0).toUpperCase()}</AvatarFallback>
+                    </Avatar>
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent className="bg-black/90 backdrop-blur-xl border-system rounded-2xl">
-                  <p className="font-body">Toggle to show most recently contacted leads first</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-
-            <Button
-              onClick={() => setIsImportOpen(true)}
-              variant="outline"
-              className="border-system text-medium-hierarchy hover:bg-white/10 rounded-full px-6 backdrop-blur-sm font-body"
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              Import CSV
-            </Button>
-            <Button
-              onClick={() => setIsAddModalOpen(true)}
-              className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-full px-6 transition-all duration-200 font-body"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Lead
-            </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-56" align="end" forceMount>
+                  <DropdownMenuItem onClick={handleSignOut}>
+                    <LogOut className="mr-2 h-4 w-4" />
+                    <span>Sign out</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-        </motion.div>
+        </div>
+      </header>
 
-        <MetricCards callsMade={callsMade} responsesReceived={responsesReceived} weeklyData={weeklyData} />
+      <div className="flex h-[calc(100vh-73px)]">
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="p-6">
+            {error && (
+              <Alert className="mb-4 border-yellow-200 bg-yellow-50">
+                <AlertDescription className="text-yellow-800">{error}</AlertDescription>
+              </Alert>
+            )}
 
-        <FollowUpPriority leads={leads} onLeadSelect={handleLeadSelect} />
+            {/* Metrics */}
+            <MetricCards leads={leads} />
 
-        <LeadsTable
-          leads={leads}
-          onLeadUpdate={handleLeadUpdate}
-          onLeadSelect={handleLeadSelect}
-          sortByRecent={sortByRecent}
-        />
+            {/* Actions Bar */}
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center space-x-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <Input
+                    placeholder="Search leads..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10 w-80"
+                  />
+                </div>
+                <Button variant="outline" size="sm">
+                  <Filter className="mr-2 h-4 w-4" />
+                  Filter
+                </Button>
+              </div>
 
-        <LeadPanel
-          lead={selectedLead}
-          isOpen={isPanelOpen}
-          onClose={() => setIsPanelOpen(false)}
-          onAddNote={handleAddNote}
-          onUpdateLead={handleLeadUpdate}
-        />
+              <div className="flex items-center space-x-2">
+                <Button variant="outline" size="sm" onClick={() => setIsCsvImportOpen(true)}>
+                  <Upload className="mr-2 h-4 w-4" />
+                  Import CSV
+                </Button>
+                <Button variant="outline" size="sm">
+                  <Download className="mr-2 h-4 w-4" />
+                  Export
+                </Button>
+                <Button size="sm" onClick={() => setIsAddLeadOpen(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Lead
+                </Button>
+              </div>
+            </div>
 
-        <AddLeadModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} onAddLead={handleAddLead} />
+            {/* Content Tabs */}
+            <Tabs defaultValue="leads" className="flex-1">
+              <TabsList>
+                <TabsTrigger value="leads">All Leads ({filteredLeads.length})</TabsTrigger>
+                <TabsTrigger value="follow-ups">Follow-ups</TabsTrigger>
+                <TabsTrigger value="recent">Recent Activity</TabsTrigger>
+              </TabsList>
 
-        <CSVImport isOpen={isImportOpen} onClose={() => setIsImportOpen(false)} onImport={handleCSVImport} />
+              <TabsContent value="leads" className="mt-4">
+                {loading ? (
+                  <div className="flex items-center justify-center h-64">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                  </div>
+                ) : (
+                  <LeadsTable
+                    leads={filteredLeads}
+                    onSelectLead={setSelectedLead}
+                    onUpdateLead={handleUpdateLead}
+                    onDeleteLead={handleDeleteLead}
+                  />
+                )}
+              </TabsContent>
+
+              <TabsContent value="follow-ups" className="mt-4">
+                <FollowUpPriority leads={leads} onSelectLead={setSelectedLead} />
+              </TabsContent>
+
+              <TabsContent value="recent" className="mt-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Recent Activity</CardTitle>
+                    <CardDescription>Latest updates across all leads</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {activities.length === 0 ? (
+                      <p className="text-gray-500 text-center py-8">No recent activity</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {activities.slice(0, 10).map((activity) => (
+                          <div key={activity.id} className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg">
+                            <div className="flex-1">
+                              <p className="text-sm font-medium">{activity.description}</p>
+                              <p className="text-xs text-gray-500">
+                                {activity.createdByName} • {new Date(activity.createdAt).toLocaleDateString()}
+                              </p>
+                            </div>
+                            <Badge variant="outline" className="text-xs">
+                              {activity.type}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          </div>
+        </div>
+
+        {/* Lead Panel */}
+        {selectedLead && (
+          <LeadPanel
+            lead={selectedLead}
+            activities={activities.filter((a) => a.leadId === selectedLead.id)}
+            onClose={() => setSelectedLead(null)}
+            onUpdateLead={handleUpdateLead}
+            onAddActivity={handleAddActivity}
+          />
+        )}
       </div>
+
+      {/* Modals */}
+      <AddLeadModal isOpen={isAddLeadOpen} onClose={() => setIsAddLeadOpen(false)} onAddLead={handleAddLead} />
+
+      <CsvImport isOpen={isCsvImportOpen} onClose={() => setIsCsvImportOpen(false)} onImport={handleCsvImport} />
     </div>
   )
 }

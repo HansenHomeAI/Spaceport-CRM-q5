@@ -2,164 +2,364 @@
 
 import type React from "react"
 
-import { useState } from "react"
-import { motion } from "framer-motion"
-import { FileText, X } from "lucide-react"
+import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { Lead } from "./leads-table"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Progress } from "@/components/ui/progress"
+import { Badge } from "@/components/ui/badge"
+import { Upload, FileText, CheckCircle, Loader2 } from "lucide-react"
+import type { Lead } from "@/lib/api-client"
 
-interface CSVImportProps {
-  onImport: (leads: Lead[]) => void
+interface CsvImportProps {
   isOpen: boolean
   onClose: () => void
+  onImport: (leads: Omit<Lead, "id" | "createdAt" | "updatedAt">[]) => Promise<{ success: boolean; message: string }>
 }
 
-export function CSVImport({ onImport, isOpen, onClose }: CSVImportProps) {
-  const [file, setFile] = useState<File | null>(null)
-  const [loading, setLoading] = useState(false)
+interface ParsedLead {
+  name: string
+  email: string
+  phone?: string
+  company?: string
+  status: "new" | "contacted" | "qualified" | "proposal" | "won" | "lost"
+  source?: string
+  value?: number
+  notes?: string[]
+}
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0]
+export function CsvImport({ isOpen, onClose, onImport }: CsvImportProps) {
+  const [file, setFile] = useState<File | null>(null)
+  const [parsedLeads, setParsedLeads] = useState<ParsedLead[]>([])
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
+  const [step, setStep] = useState<"upload" | "preview" | "importing" | "complete">("upload")
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0]
     if (selectedFile && selectedFile.type === "text/csv") {
       setFile(selectedFile)
+      parseCSV(selectedFile)
+    } else {
+      setMessage({ type: "error", text: "Please select a valid CSV file" })
     }
   }
 
-  const parseCSV = (csvText: string): Lead[] => {
-    const lines = csvText.split("\n")
-    const headers = lines[0].split(",").map((h) => h.trim().toLowerCase())
+  const parseCSV = async (file: File) => {
+    setIsProcessing(true)
+    setMessage(null)
 
-    const leads: Lead[] = []
+    try {
+      const text = await file.text()
+      const lines = text.split("\n").filter((line) => line.trim())
 
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(",").map((v) => v.trim())
-      if (values.length < 4) continue // Skip incomplete rows
-
-      const lead: Lead = {
-        id: `imported-${Date.now()}-${i}`,
-        name: values[headers.indexOf("name")] || values[0] || "",
-        phone: values[headers.indexOf("phone")] || values[1] || "",
-        email: values[headers.indexOf("email")] || values[2] || "",
-        address: values[headers.indexOf("address")] || values[3] || "",
-        status: (values[headers.indexOf("status")] as Lead["status"]) || "cold",
-        lastInteraction: values[headers.indexOf("last_interaction")] || new Date().toISOString().split("T")[0],
-        notes: [],
+      if (lines.length < 2) {
+        setMessage({ type: "error", text: "CSV file must contain at least a header row and one data row" })
+        setIsProcessing(false)
+        return
       }
 
-      // Parse notes if they exist
-      const notesText = values[headers.indexOf("notes")]
-      if (notesText) {
-        lead.notes = [
-          {
-            id: `note-${Date.now()}`,
-            text: notesText,
-            timestamp: new Date().toISOString(),
-            type: "note",
-          },
-        ]
+      const headers = lines[0].split(",").map((h) => h.trim().toLowerCase())
+      const dataLines = lines.slice(1)
+
+      // Map common header variations
+      const headerMap: { [key: string]: string } = {
+        name: "name",
+        "full name": "name",
+        "contact name": "name",
+        email: "email",
+        "email address": "email",
+        phone: "phone",
+        "phone number": "phone",
+        company: "company",
+        organization: "company",
+        status: "status",
+        "lead status": "status",
+        source: "source",
+        "lead source": "source",
+        value: "value",
+        "deal value": "value",
+        notes: "notes",
+        description: "notes",
       }
 
-      leads.push(lead)
+      const mappedHeaders = headers.map((h) => headerMap[h] || h)
+
+      const leads: ParsedLead[] = []
+      const errors: string[] = []
+
+      for (let i = 0; i < dataLines.length; i++) {
+        const values = dataLines[i].split(",").map((v) => v.trim().replace(/^"|"$/g, ""))
+
+        if (values.length !== headers.length) {
+          errors.push(`Row ${i + 2}: Column count mismatch`)
+          continue
+        }
+
+        const leadData: any = {}
+        mappedHeaders.forEach((header, index) => {
+          leadData[header] = values[index]
+        })
+
+        // Validate required fields
+        if (!leadData.name || !leadData.email) {
+          errors.push(`Row ${i + 2}: Missing required fields (name, email)`)
+          continue
+        }
+
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        if (!emailRegex.test(leadData.email)) {
+          errors.push(`Row ${i + 2}: Invalid email format`)
+          continue
+        }
+
+        // Parse and validate status
+        const validStatuses = ["new", "contacted", "qualified", "proposal", "won", "lost"]
+        let status: ParsedLead["status"] = "new"
+        if (leadData.status && validStatuses.includes(leadData.status.toLowerCase())) {
+          status = leadData.status.toLowerCase() as ParsedLead["status"]
+        }
+
+        // Parse value
+        let value: number | undefined
+        if (leadData.value) {
+          const numValue = Number.parseFloat(leadData.value.replace(/[$,]/g, ""))
+          if (!isNaN(numValue)) {
+            value = numValue
+          }
+        }
+
+        // Parse notes
+        let notes: string[] = []
+        if (leadData.notes) {
+          notes = [leadData.notes]
+        }
+
+        leads.push({
+          name: leadData.name,
+          email: leadData.email,
+          phone: leadData.phone || undefined,
+          company: leadData.company || undefined,
+          status,
+          source: leadData.source || "CSV Import",
+          value,
+          notes: notes.length > 0 ? notes : undefined,
+        })
+      }
+
+      if (errors.length > 0) {
+        setMessage({
+          type: "error",
+          text: `Found ${errors.length} errors:\n${errors.slice(0, 5).join("\n")}${errors.length > 5 ? "\n..." : ""}`,
+        })
+      }
+
+      if (leads.length === 0) {
+        setMessage({ type: "error", text: "No valid leads found in CSV file" })
+        setIsProcessing(false)
+        return
+      }
+
+      setParsedLeads(leads)
+      setStep("preview")
+      setMessage({
+        type: "success",
+        text: `Successfully parsed ${leads.length} leads${errors.length > 0 ? ` (${errors.length} errors)` : ""}`,
+      })
+    } catch (error) {
+      console.error("CSV parsing error:", error)
+      setMessage({ type: "error", text: "Failed to parse CSV file. Please check the format." })
+    } finally {
+      setIsProcessing(false)
     }
-
-    return leads
   }
 
   const handleImport = async () => {
-    if (!file) return
+    if (parsedLeads.length === 0) return
 
-    setLoading(true)
+    setStep("importing")
+    setIsProcessing(true)
+    setProgress(0)
+
     try {
-      const text = await file.text()
-      const importedLeads = parseCSV(text)
-      onImport(importedLeads)
-      onClose()
-      setFile(null)
+      // Simulate progress for better UX
+      const progressInterval = setInterval(() => {
+        setProgress((prev) => Math.min(prev + 10, 90))
+      }, 200)
+
+      const result = await onImport(parsedLeads)
+
+      clearInterval(progressInterval)
+      setProgress(100)
+
+      if (result.success) {
+        setMessage({ type: "success", text: result.message })
+        setStep("complete")
+        setTimeout(() => {
+          handleClose()
+        }, 2000)
+      } else {
+        setMessage({ type: "error", text: result.message })
+        setStep("preview")
+      }
     } catch (error) {
-      console.error("Error importing CSV:", error)
+      console.error("Import error:", error)
+      setMessage({ type: "error", text: "Failed to import leads. Please try again." })
+      setStep("preview")
     } finally {
-      setLoading(false)
+      setIsProcessing(false)
     }
   }
 
-  if (!isOpen) return null
+  const handleClose = () => {
+    setFile(null)
+    setParsedLeads([])
+    setMessage(null)
+    setStep("upload")
+    setProgress(0)
+    setIsProcessing(false)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
+    onClose()
+  }
+
+  const renderUploadStep = () => (
+    <div className="space-y-4">
+      <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+        <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+        <div className="space-y-2">
+          <Label htmlFor="csv-file" className="text-lg font-medium cursor-pointer">
+            Choose CSV file to import
+          </Label>
+          <p className="text-sm text-gray-500">
+            File should contain columns: name, email, phone, company, status, source, value
+          </p>
+        </div>
+        <Input
+          ref={fileInputRef}
+          id="csv-file"
+          type="file"
+          accept=".csv"
+          onChange={handleFileSelect}
+          className="mt-4"
+        />
+      </div>
+
+      <div className="bg-blue-50 p-4 rounded-lg">
+        <h4 className="font-medium text-blue-900 mb-2">CSV Format Requirements:</h4>
+        <ul className="text-sm text-blue-800 space-y-1">
+          <li>• Required columns: name, email</li>
+          <li>• Optional columns: phone, company, status, source, value, notes</li>
+          <li>• First row should contain column headers</li>
+          <li>• Status values: new, contacted, qualified, proposal, won, lost</li>
+        </ul>
+      </div>
+    </div>
+  )
+
+  const renderPreviewStep = () => (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-medium">Preview Import</h3>
+        <Badge variant="secondary">{parsedLeads.length} leads</Badge>
+      </div>
+
+      <div className="max-h-64 overflow-y-auto border rounded-lg">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="px-3 py-2 text-left">Name</th>
+              <th className="px-3 py-2 text-left">Email</th>
+              <th className="px-3 py-2 text-left">Company</th>
+              <th className="px-3 py-2 text-left">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {parsedLeads.slice(0, 10).map((lead, index) => (
+              <tr key={index} className="border-t">
+                <td className="px-3 py-2">{lead.name}</td>
+                <td className="px-3 py-2">{lead.email}</td>
+                <td className="px-3 py-2">{lead.company || "-"}</td>
+                <td className="px-3 py-2">
+                  <Badge variant="outline">{lead.status}</Badge>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {parsedLeads.length > 10 && (
+          <div className="p-3 text-center text-sm text-gray-500 border-t">
+            ... and {parsedLeads.length - 10} more leads
+          </div>
+        )}
+      </div>
+
+      <div className="flex space-x-2">
+        <Button variant="outline" onClick={() => setStep("upload")}>
+          Back
+        </Button>
+        <Button onClick={handleImport} disabled={isProcessing}>
+          {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Import {parsedLeads.length} Leads
+        </Button>
+      </div>
+    </div>
+  )
+
+  const renderImportingStep = () => (
+    <div className="space-y-4 text-center">
+      <Loader2 className="mx-auto h-12 w-12 animate-spin text-blue-600" />
+      <div>
+        <h3 className="text-lg font-medium">Importing Leads...</h3>
+        <p className="text-sm text-gray-500">Please wait while we save your leads to the database</p>
+      </div>
+      <Progress value={progress} className="w-full" />
+      <p className="text-sm text-gray-500">{progress}% complete</p>
+    </div>
+  )
+
+  const renderCompleteStep = () => (
+    <div className="space-y-4 text-center">
+      <CheckCircle className="mx-auto h-12 w-12 text-green-600" />
+      <div>
+        <h3 className="text-lg font-medium text-green-900">Import Complete!</h3>
+        <p className="text-sm text-gray-500">Your leads have been successfully imported</p>
+      </div>
+    </div>
+  )
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-    >
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        className="w-full max-w-md"
-      >
-        <Card className="bg-black/90 backdrop-blur-xl border-white/10 rounded-3xl">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-white">Import CSV</CardTitle>
-            <Button variant="ghost" size="sm" onClick={onClose} className="text-gray-400 hover:text-white">
-              <X className="h-4 w-4" />
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="text-sm text-gray-400">
-              Upload a CSV file with columns: name, phone, email, address, status, notes
-            </div>
+    <Dialog open={isOpen} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-[600px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center">
+            <FileText className="mr-2 h-5 w-5" />
+            Import Leads from CSV
+          </DialogTitle>
+          <DialogDescription>Upload a CSV file to bulk import leads into your CRM</DialogDescription>
+        </DialogHeader>
 
-            <div className="space-y-2">
-              <Label htmlFor="csv-file" className="text-white">
-                Choose CSV File
-              </Label>
-              <Input
-                id="csv-file"
-                type="file"
-                accept=".csv"
-                onChange={handleFileChange}
-                className="bg-black/20 backdrop-blur-sm border-white/10 text-white file:bg-gradient-to-r file:from-purple-600 file:to-purple-700 file:text-white file:border-0 file:rounded-full file:px-4 file:py-2 rounded-full"
-              />
-            </div>
+        <div className="space-y-4">
+          {message && (
+            <Alert className={message.type === "error" ? "border-red-200 bg-red-50" : "border-green-200 bg-green-50"}>
+              <AlertDescription className={message.type === "error" ? "text-red-800" : "text-green-800"}>
+                {message.text}
+              </AlertDescription>
+            </Alert>
+          )}
 
-            {file && (
-              <div className="flex items-center gap-2 p-3 bg-white/5 rounded-lg">
-                <FileText className="h-4 w-4 text-blue-400" />
-                <span className="text-white text-sm">{file.name}</span>
-              </div>
-            )}
-
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={onClose}
-                className="flex-1 border-white/20 text-gray-300 bg-transparent rounded-full"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleImport}
-                disabled={!file || loading}
-                className="flex-1 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-full"
-              >
-                {loading ? "Importing..." : "Import"}
-              </Button>
-            </div>
-
-            <div className="text-xs text-gray-500 mt-4">
-              <strong>Sample CSV format:</strong>
-              <pre className="mt-1 p-2 bg-white/5 rounded text-xs">
-                {`name,phone,email,address,status,notes
-John Smith,555-123-4567,john@example.com,123 Main St Beverly Hills CA,interested,Initial contact made
-Sarah Johnson,555-987-6543,sarah@example.com,456 Oak Ave Manhattan NY,contacted,Follow-up needed`}
-              </pre>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-    </motion.div>
+          {step === "upload" && renderUploadStep()}
+          {step === "preview" && renderPreviewStep()}
+          {step === "importing" && renderImportingStep()}
+          {step === "complete" && renderCompleteStep()}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

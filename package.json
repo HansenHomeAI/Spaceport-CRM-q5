@@ -39,6 +39,7 @@
     "@radix-ui/react-toggle-group": "latest",
     "@radix-ui/react-tooltip": "latest",
     "@tanstack/react-table": "latest",
+    "amazon-cognito-identity-js": "latest",
     "autoprefixer": "^10.4.20",
     "aws-cdk-lib": "latest",
     "class-variance-authority": "^0.7.1",

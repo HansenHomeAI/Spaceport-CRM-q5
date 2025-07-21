@@ -199,7 +199,12 @@ export function LeadsTable({ leads, onLeadUpdate, onLeadSelect, sortByRecent = f
         header: "Status",
         cell: ({ getValue, row }) => {
           const status = getValue()
-          const statusColor = colors.status[status]
+          const statusColor = colors.status[status as keyof typeof colors.status] ?? {
+            bg: "bg-gray-500/10",
+            text: "text-gray-300",
+            border: "border-gray-500/20",
+            icon: "#6b7280", // Gray-500
+          }
           return (
             <Select
               value={status}
@@ -207,7 +212,9 @@ export function LeadsTable({ leads, onLeadUpdate, onLeadSelect, sortByRecent = f
             >
               <SelectTrigger className="w-32 bg-transparent border-none p-0">
                 <Badge
-                  className={`${statusColor.bg} ${statusColor.text} ${statusColor.border} rounded-full px-4 py-1.5 font-body`}
+                  className={`${statusColor?.bg ?? "bg-gray-500/10"} ${statusColor?.text ?? "text-gray-300"} ${
+                    statusColor?.border ?? "border-gray-500/20"
+                  } rounded-full px-4 py-1.5 font-body`}
                 >
                   {status.charAt(0).toUpperCase() + status.slice(1)}
                 </Badge>
