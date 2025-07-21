@@ -1,9 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'export',
+  // output: 'export', // Commented out for development
   trailingSlash: true,
   skipTrailingSlashRedirect: true,
-  distDir: 'out',
+  // distDir: 'out', // Commented out for development
   eslint: {
     ignoreDuringBuilds: true,
   },

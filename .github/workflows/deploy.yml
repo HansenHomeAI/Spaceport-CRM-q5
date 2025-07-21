@@ -1,0 +1,132 @@
+name: Deploy Spaceport CRM
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+    outputs:
+      api-url: ${{ steps.cdk-outputs.outputs.api-url }}
+      user-pool-id: ${{ steps.cdk-outputs.outputs.user-pool-id }}
+      user-pool-client-id: ${{ steps.cdk-outputs.outputs.user-pool-client-id }}
+      region: ${{ steps.cdk-outputs.outputs.region }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: 'cdk/package-lock.json'
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-west-2
+
+    - name: Install CDK dependencies
+      working-directory: ./cdk
+      run: |
+        npm ci
+        npm install -g aws-cdk
+
+    - name: CDK Bootstrap (if needed)
+      working-directory: ./cdk
+      run: |
+        cdk bootstrap --require-approval never || echo "Bootstrap already exists"
+
+    - name: CDK Deploy
+      working-directory: ./cdk
+      run: |
+        echo "Starting CDK deployment..."
+        cdk deploy --require-approval never --outputs-file outputs.json
+        echo "CDK deployment completed"
+
+    - name: Extract CDK Outputs
+      id: cdk-outputs
+      working-directory: ./cdk
+      run: |
+        if [ -f outputs.json ]; then
+          echo "CDK outputs file found"
+          cat outputs.json
+          
+          API_URL=$(jq -r '.SpaceportCrmStack.ApiUrl // empty' outputs.json)
+          USER_POOL_ID=$(jq -r '.SpaceportCrmStack.UserPoolId // empty' outputs.json)
+          USER_POOL_CLIENT_ID=$(jq -r '.SpaceportCrmStack.UserPoolClientId // empty' outputs.json)
+          REGION=$(jq -r '.SpaceportCrmStack.Region // empty' outputs.json)
+          
+          echo "api-url=$API_URL" >> $GITHUB_OUTPUT
+          echo "user-pool-id=$USER_POOL_ID" >> $GITHUB_OUTPUT
+          echo "user-pool-client-id=$USER_POOL_CLIENT_ID" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+          
+          echo "Extracted outputs:"
+          echo "API URL: $API_URL"
+          echo "User Pool ID: $USER_POOL_ID"
+          echo "User Pool Client ID: $USER_POOL_CLIENT_ID"
+          echo "Region: $REGION"
+        else
+          echo "CDK outputs file not found"
+          exit 1
+        fi
+
+  deploy-frontend:
+    needs: deploy-infrastructure
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Create environment file
+      run: |
+        echo "NEXT_PUBLIC_AWS_REGION=${{ needs.deploy-infrastructure.outputs.region }}" > .env.local
+        echo "NEXT_PUBLIC_USER_POOL_ID=${{ needs.deploy-infrastructure.outputs.user-pool-id }}" >> .env.local
+        echo "NEXT_PUBLIC_USER_POOL_CLIENT_ID=${{ needs.deploy-infrastructure.outputs.user-pool-client-id }}" >> .env.local
+        echo "NEXT_PUBLIC_API_URL=${{ needs.deploy-infrastructure.outputs.api-url }}" >> .env.local
+        
+        echo "Environment variables set:"
+        cat .env.local
+
+    - name: Build Next.js app
+      run: |
+        npm run build
+        touch out/.nojekyll
+
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./out
+        cname: ${{ vars.CUSTOM_DOMAIN }}
+
+    - name: Deployment Summary
+      run: |
+        echo "## 🚀 Deployment Complete!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Infrastructure Deployed:" >> $GITHUB_STEP_SUMMARY
+        echo "- **API URL:** ${{ needs.deploy-infrastructure.outputs.api-url }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **User Pool ID:** ${{ needs.deploy-infrastructure.outputs.user-pool-id }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Region:** ${{ needs.deploy-infrastructure.outputs.region }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Frontend Deployed:" >> $GITHUB_STEP_SUMMARY
+        echo "- **GitHub Pages:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Users can now sign up and start using the CRM!" >> $GITHUB_STEP_SUMMARY
