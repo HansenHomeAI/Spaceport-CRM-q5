@@ -10,8 +10,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Separator } from "@/components/ui/separator"
-import { Loader2, Rocket, Play } from "lucide-react"
+import { Loader2, Play } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
+import Image from "next/image"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -93,19 +94,19 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-black p-4">
-      <Card className="w-full max-w-md bg-black/90 backdrop-blur-xl border-white/10 rounded-3xl">
+      <Card className="w-full max-w-md bg-black/90 backdrop-blur-xl border-white/10 rounded-xl">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-purple-500/20">
-            <Rocket className="h-6 w-6 text-purple-400" />
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center">
+            <Image src="/logo-icon.svg" alt="Company Logo" width={64} height={64} className="w-full h-full" />
           </div>
-          <CardTitle className="text-white">Spaceport CRM</CardTitle>
+          <CardTitle className="text-white text-2xl">Welcome</CardTitle>
           <CardDescription className="text-gray-400">Sign in to your account or create a new one</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Demo Account Button */}
           <Button
             onClick={handleDemoSignIn}
-            className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-full"
+            className="w-full bg-white text-black hover:bg-gray-100 rounded-lg font-body"
           >
             <Play className="mr-2 h-4 w-4" />
             Try Demo Account
@@ -142,7 +143,7 @@ export default function LoginPage() {
                     placeholder="Enter your email"
                     value={signInForm.email}
                     onChange={(e) => setSignInForm({ ...signInForm, email: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-lg"
                     required
                   />
                 </div>
@@ -156,14 +157,14 @@ export default function LoginPage() {
                     placeholder="Enter your password"
                     value={signInForm.password}
                     onChange={(e) => setSignInForm({ ...signInForm, password: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-lg"
                     required
                   />
                 </div>
 
                 <Button
                   type="submit"
-                  className="w-full bg-white/10 hover:bg-white/20 text-white rounded-full"
+                  className="w-full bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/20"
                   disabled={isLoading}
                 >
                   {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -193,7 +194,7 @@ export default function LoginPage() {
                     placeholder="Enter your full name"
                     value={signUpForm.name}
                     onChange={(e) => setSignUpForm({ ...signUpForm, name: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-lg"
                     required
                   />
                 </div>
@@ -207,7 +208,7 @@ export default function LoginPage() {
                     placeholder="Enter your email"
                     value={signUpForm.email}
                     onChange={(e) => setSignUpForm({ ...signUpForm, email: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-lg"
                     required
                   />
                 </div>
@@ -221,7 +222,7 @@ export default function LoginPage() {
                     placeholder="Enter your password (min 6 characters)"
                     value={signUpForm.password}
                     onChange={(e) => setSignUpForm({ ...signUpForm, password: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-lg"
                     required
                     minLength={6}
                   />
@@ -236,14 +237,14 @@ export default function LoginPage() {
                     placeholder="Confirm your password"
                     value={signUpForm.confirmPassword}
                     onChange={(e) => setSignUpForm({ ...signUpForm, confirmPassword: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-lg"
                     required
                   />
                 </div>
 
                 <Button
                   type="submit"
-                  className="w-full bg-white/10 hover:bg-white/20 text-white rounded-full"
+                  className="w-full bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/20"
                   disabled={isLoading}
                 >
                   {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

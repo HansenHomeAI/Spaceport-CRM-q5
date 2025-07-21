@@ -3,160 +3,142 @@
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
 
-export interface AuthUser {
+interface User {
   id: string
-  email: string
   name: string
-  accessToken: string
+  email: string
   isDemo?: boolean
+  accessToken?: string
 }
 
 interface AuthContextType {
-  user: AuthUser | null
-  loading: boolean
+  user: User | null
   signIn: (email: string, password: string) => Promise<{ success: boolean; message: string }>
   signUp: (email: string, password: string, name: string) => Promise<{ success: boolean; message: string }>
-  confirmSignUp: (email: string, code: string) => Promise<{ success: boolean; message: string }>
-  signOut: () => void
   signInDemo: () => void
+  signOut: () => void
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Demo accounts for testing
-const DEMO_ACCOUNTS = [
-  {
-    id: "demo-user-1",
-    email: "demo@spaceport.com",
-    name: "Demo User",
-    accessToken: "demo-token-1",
-    isDemo: true,
-  },
-  {
-    id: "demo-user-2",
-    email: "sarah@spaceport.com",
-    name: "Sarah Johnson",
-    accessToken: "demo-token-2",
-    isDemo: true,
-  },
-  {
-    id: "demo-user-3",
-    email: "mike@spaceport.com",
-    name: "Mike Davis",
-    accessToken: "demo-token-3",
-    isDemo: true,
-  },
+// Demo accounts
+const demoAccounts = [
+  { id: "demo-1", email: "demo@spaceport.com", password: "demo123", name: "Demo User" },
+  { id: "demo-2", email: "sarah@spaceport.com", password: "demo123", name: "Sarah Johnson" },
+  { id: "demo-3", email: "mike@spaceport.com", password: "demo123", name: "Mike Davis" },
 ]
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [user, setUser] = useState<User | null>(null)
 
+  // Check for existing session on mount
   useEffect(() => {
-    // Check for existing session in localStorage
-    const savedUser = localStorage.getItem("spaceport-user")
+    const savedUser = localStorage.getItem("spaceport_user")
     if (savedUser) {
       try {
-        const parsedUser = JSON.parse(savedUser)
-        setUser(parsedUser)
+        setUser(JSON.parse(savedUser))
       } catch (error) {
-        console.error("Error parsing saved user:", error)
-        localStorage.removeItem("spaceport-user")
+        localStorage.removeItem("spaceport_user")
       }
     }
-    setLoading(false)
   }, [])
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string): Promise<{ success: boolean; message: string }> => {
     // Check demo accounts first
-    const demoAccount = DEMO_ACCOUNTS.find((account) => account.email === email)
-    if (demoAccount && password === "demo123") {
-      setUser(demoAccount)
-      localStorage.setItem("spaceport-user", JSON.stringify(demoAccount))
-      return { success: true, message: "Signed in successfully (demo mode)!" }
+    const demoAccount = demoAccounts.find((acc) => acc.email === email && acc.password === password)
+    if (demoAccount) {
+      const user: User = {
+        id: demoAccount.id,
+        name: demoAccount.name,
+        email: demoAccount.email,
+        isDemo: true,
+      }
+      setUser(user)
+      localStorage.setItem("spaceport_user", JSON.stringify(user))
+      return { success: true, message: "Signed in successfully!" }
     }
 
-    // For now, create a new user account for any other email/password combo
-    // In production, this would integrate with AWS Cognito
-    const newUser: AuthUser = {
-      id: `user-${Date.now()}`,
-      email,
-      name: email.split("@")[0],
-      accessToken: `token-${Date.now()}`,
-      isDemo: false,
+    // Check real accounts from localStorage (in production, this would be a real API call)
+    const accounts = JSON.parse(localStorage.getItem("spaceport_accounts") || "[]")
+    const account = accounts.find((acc: any) => acc.email === email && acc.password === password)
+
+    if (account) {
+      const user: User = {
+        id: account.id,
+        name: account.name,
+        email: account.email,
+        isDemo: false,
+      }
+      setUser(user)
+      localStorage.setItem("spaceport_user", JSON.stringify(user))
+      return { success: true, message: "Signed in successfully!" }
     }
 
-    setUser(newUser)
-    localStorage.setItem("spaceport-user", JSON.stringify(newUser))
-    return { success: true, message: "Signed in successfully!" }
+    return { success: false, message: "Invalid email or password" }
   }
 
-  const signUp = async (email: string, password: string, name: string) => {
-    // For now, immediately create the account
-    // In production, this would integrate with AWS Cognito
-    const newUser: AuthUser = {
-      id: `user-${Date.now()}`,
-      email,
-      name,
-      accessToken: `token-${Date.now()}`,
-      isDemo: false,
+  const signUp = async (
+    email: string,
+    password: string,
+    name: string,
+  ): Promise<{ success: boolean; message: string }> => {
+    // Check if email already exists
+    const accounts = JSON.parse(localStorage.getItem("spaceport_accounts") || "[]")
+    const existingAccount = accounts.find((acc: any) => acc.email === email)
+    const existingDemo = demoAccounts.find((acc) => acc.email === email)
+
+    if (existingAccount || existingDemo) {
+      return { success: false, message: "An account with this email already exists" }
     }
 
-    setUser(newUser)
-    localStorage.setItem("spaceport-user", JSON.stringify(newUser))
+    // Create new account
+    const newAccount = {
+      id: Date.now().toString(),
+      email,
+      password,
+      name,
+      createdAt: new Date().toISOString(),
+    }
+
+    accounts.push(newAccount)
+    localStorage.setItem("spaceport_accounts", JSON.stringify(accounts))
+
+    // Sign in the new user
+    const user: User = {
+      id: newAccount.id,
+      name: newAccount.name,
+      email: newAccount.email,
+      isDemo: false,
+    }
+    setUser(user)
+    localStorage.setItem("spaceport_user", JSON.stringify(user))
+
     return { success: true, message: "Account created successfully!" }
   }
 
-  const confirmSignUp = async (email: string, code: string) => {
-    // For now, just return success
-    // In production, this would verify the code with AWS Cognito
-    return { success: true, message: "Account confirmed successfully!" }
-  }
-
   const signInDemo = () => {
-    const demoUser = DEMO_ACCOUNTS[0]
+    const demoUser: User = {
+      id: "demo-1",
+      name: "Demo User",
+      email: "demo@spaceport.com",
+      isDemo: true,
+    }
     setUser(demoUser)
-    localStorage.setItem("spaceport-user", JSON.stringify(demoUser))
+    localStorage.setItem("spaceport_user", JSON.stringify(demoUser))
   }
 
   const signOut = () => {
     setUser(null)
-    localStorage.removeItem("spaceport-user")
+    localStorage.removeItem("spaceport_user")
   }
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        signIn,
-        signUp,
-        confirmSignUp,
-        signOut,
-        signInDemo,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  )
+  return <AuthContext.Provider value={{ user, signIn, signUp, signInDemo, signOut }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {
   const context = useContext(AuthContext)
-
-  // If no provider is mounted (e.g. in an isolated preview), fall back to
-  // a no-op unauthenticated context to prevent hard crashes.
   if (context === undefined) {
-    return {
-      user: null,
-      loading: false,
-      signIn: async (_e: string, _p: string) => ({ success: false, message: "AuthProvider not mounted." }),
-      signUp: async (_e: string, _p: string, _n: string) => ({ success: false, message: "AuthProvider not mounted." }),
-      confirmSignUp: async (_e: string, _c: string) => ({ success: false, message: "AuthProvider not mounted." }),
-      signOut: () => {},
-      signInDemo: () => {},
-    } satisfies AuthContextType
+    throw new Error("useAuth must be used within an AuthProvider")
   }
-
   return context
 }

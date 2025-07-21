@@ -1,7 +1,5 @@
 "use client"
 
-import { TooltipTrigger } from "@/components/ui/tooltip"
-
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
@@ -10,126 +8,26 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Search, Plus, Filter, Download, Upload, LogOut, Loader2, Clock, Info } from "lucide-react"
-import { Tooltip, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
+import { Search, Plus, Filter, Upload, LogOut, Loader2, Clock, Info, Eye, EyeOff } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useAuth } from "@/lib/auth-context"
 import { LeadsTable, type Lead } from "@/components/leads-table"
 import { LeadPanel } from "@/components/lead-panel"
 import { AddLeadModal } from "@/components/add-lead-modal"
 import { CSVImport } from "@/components/csv-import"
 import { FollowUpPriority } from "@/components/follow-up-priority"
-
-// Enhanced mock data with ownership
-const mockLeads: Lead[] = [
-  {
-    id: "1",
-    name: "John Smith",
-    phone: "+1 (555) 123-4567",
-    email: "john.smith@techcorp.com",
-    address: "1234 Maple Street, Beverly Hills, CA 90210",
-    status: "interested",
-    lastInteraction: "2024-01-15",
-    ownerId: "demo-user-1",
-    ownerName: "Demo User",
-    notes: [
-      {
-        id: "1",
-        text: "Initial contact made, showed strong interest in our enterprise solution",
-        timestamp: "2024-01-15T10:00:00Z",
-        type: "call",
-      },
-      {
-        id: "2",
-        text: "Sent product demo video and pricing information",
-        timestamp: "2024-01-14T14:30:00Z",
-        type: "email",
-      },
-    ],
-  },
-  {
-    id: "2",
-    name: "Sarah Johnson",
-    phone: "+1 (555) 987-6543",
-    email: "sarah.johnson@innovate.eu",
-    address: "5678 Oak Avenue, Manhattan, NY 10001",
-    status: "contacted",
-    lastInteraction: "2024-01-10",
-    // No owner - unclaimed lead
-    notes: [
-      {
-        id: "3",
-        text: "Left voicemail, awaiting callback",
-        timestamp: "2024-01-10T09:15:00Z",
-        type: "call",
-      },
-    ],
-  },
-  {
-    id: "3",
-    name: "Mike Davis",
-    phone: "+1 (555) 456-7890",
-    email: "mike.davis@startupxyz.com",
-    address: "9012 Pine Road, Austin, TX 78701",
-    status: "cold",
-    lastInteraction: "2024-01-05",
-    ownerId: "demo-user-2",
-    ownerName: "Sarah Johnson",
-    notes: [],
-  },
-  {
-    id: "4",
-    name: "Emily Chen",
-    phone: "+1 (555) 321-9876",
-    email: "emily.chen@globaltech.com",
-    address: "3456 Cedar Lane, San Francisco, CA 94102",
-    status: "closed",
-    lastInteraction: "2024-01-12",
-    ownerId: "demo-user-1",
-    ownerName: "Demo User",
-    notes: [
-      {
-        id: "4",
-        text: "Deal closed! Signed annual contract for $50k",
-        timestamp: "2024-01-12T16:45:00Z",
-        type: "note",
-      },
-      {
-        id: "5",
-        text: "Final negotiation call - agreed on terms",
-        timestamp: "2024-01-11T11:30:00Z",
-        type: "call",
-      },
-    ],
-  },
-  {
-    id: "5",
-    name: "Robert Wilson",
-    phone: "+1 (555) 654-3210",
-    email: "robert.wilson@manufacturing.com",
-    address: "7890 Elm Street, Chicago, IL 60601",
-    status: "contacted",
-    lastInteraction: "2024-01-08",
-    // No owner - unclaimed lead
-    notes: [
-      {
-        id: "6",
-        text: "Interested in pilot program, scheduling demo for next week",
-        timestamp: "2024-01-08T13:20:00Z",
-        type: "email",
-      },
-    ],
-  },
-]
+import Image from "next/image"
 
 export default function DashboardPage() {
   const { user, signOut } = useAuth()
   const router = useRouter()
-  const [leads, setLeads] = useState<Lead[]>(mockLeads)
+  const [leads, setLeads] = useState<Lead[]>([]) // Start with empty array
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isPanelOpen, setIsPanelOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [sortByRecent, setSortByRecent] = useState(false)
+  const [showDormant, setShowDormant] = useState(false)
   const [filterByOwnership, setFilterByOwnership] = useState<"all" | "mine" | "unclaimed">("all")
 
   // Redirect if not authenticated
@@ -144,6 +42,8 @@ export default function DashboardPage() {
   const responsesReceived = leads.filter((lead) => lead.status === "interested" || lead.status === "closed").length
   const myLeads = leads.filter((lead) => lead.ownerId === user?.id).length
   const unclaimedLeads = leads.filter((lead) => !lead.ownerId).length
+  const dormantLeads = leads.filter((lead) => lead.priority === "dormant").length
+  const highPriorityLeads = leads.filter((lead) => lead.priority === "high").length
 
   // Filter leads based on ownership
   const filteredLeads = leads.filter((lead) => {
@@ -185,7 +85,7 @@ export default function DashboardPage() {
     }
   }
 
-  const handleCSVImport = async (importedLeads: Omit<Lead, "id" | "createdAt" | "updatedAt">[]) => {
+  const handleCSVImport = async (importedLeads: Omit<Lead, "id">[]) => {
     const leadsWithIds: Lead[] = importedLeads.map((lead) => ({
       ...lead,
       id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
@@ -216,7 +116,7 @@ export default function DashboardPage() {
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black">
-        <Loader2 className="h-8 w-8 animate-spin text-purple-400" />
+        <Loader2 className="h-8 w-8 animate-spin text-white" />
       </div>
     )
   }
@@ -224,18 +124,26 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-black p-6">
       <div className="max-w-7xl mx-auto">
+        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
           className="flex items-center justify-between mb-8"
         >
-          <div>
-            <h1 className="text-3xl font-title text-primary-hierarchy mb-2">Welcome back, {user?.name}</h1>
-            <p className="text-medium-hierarchy font-body">Here's what's happening with your leads today.</p>
-            {user?.isDemo && (
-              <Badge className="mt-2 bg-purple-500/20 text-purple-300 border-purple-500/30">Demo Mode</Badge>
-            )}
+          <div className="flex items-center gap-4">
+            <Image src="/logo-icon.svg" alt="Company Logo" width={40} height={40} className="w-10 h-10" />
+            <div>
+              <h1 className="text-3xl font-title text-white mb-2">Welcome back, {user?.name}</h1>
+              <p className="text-gray-400 font-body">
+                {leads.length === 0
+                  ? "Get started by importing your CSV file or adding your first lead."
+                  : "Here's what's happening with your leads today."}
+              </p>
+              {user?.isDemo && (
+                <Badge className="mt-2 bg-[#CD70E4]/20 text-[#CD70E4] border-[#CD70E4]/30">Demo Mode</Badge>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-4">
             <DropdownMenu>
@@ -243,7 +151,7 @@ export default function DashboardPage() {
                 <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                   <Avatar className="h-8 w-8">
                     <AvatarImage src="/placeholder-user.jpg" alt={user.name} />
-                    <AvatarFallback className="bg-purple-500/20 text-purple-300">
+                    <AvatarFallback className="bg-white/10 text-white">
                       {user.name.charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
@@ -260,27 +168,41 @@ export default function DashboardPage() {
         </motion.div>
 
         {/* Enhanced Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card className="bg-black/20 backdrop-blur-xl border-system rounded-3xl">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
+          <Card className="bg-black/20 backdrop-blur-xl border-white/10 rounded-xl">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-medium-hierarchy font-body text-sm">Total Leads</p>
-                  <p className="text-3xl font-bold text-primary-hierarchy">{leads.length}</p>
+                  <p className="text-gray-400 font-body text-sm">Total Leads</p>
+                  <p className="text-3xl font-bold text-white">{leads.length}</p>
                 </div>
-                <div className="h-12 w-12 bg-purple-500/20 rounded-full flex items-center justify-center">
-                  <Search className="h-6 w-6 text-purple-400" />
+                <div className="h-12 w-12 bg-white/10 rounded-full flex items-center justify-center">
+                  <Search className="h-6 w-6 text-white" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="bg-black/20 backdrop-blur-xl border-system rounded-3xl">
+          <Card className="bg-black/20 backdrop-blur-xl border-white/10 rounded-xl">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-medium-hierarchy font-body text-sm">My Leads</p>
-                  <p className="text-3xl font-bold text-primary-hierarchy">{myLeads}</p>
+                  <p className="text-gray-400 font-body text-sm">High Priority</p>
+                  <p className="text-3xl font-bold text-white">{highPriorityLeads}</p>
+                </div>
+                <div className="h-12 w-12 bg-red-500/20 rounded-full flex items-center justify-center">
+                  <Clock className="h-6 w-6 text-red-400" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-black/20 backdrop-blur-xl border-white/10 rounded-xl">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-400 font-body text-sm">My Leads</p>
+                  <p className="text-3xl font-bold text-white">{myLeads}</p>
                 </div>
                 <div className="h-12 w-12 bg-blue-500/20 rounded-full flex items-center justify-center">
                   <Plus className="h-6 w-6 text-blue-400" />
@@ -289,12 +211,12 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="bg-black/20 backdrop-blur-xl border-system rounded-3xl">
+          <Card className="bg-black/20 backdrop-blur-xl border-white/10 rounded-xl">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-medium-hierarchy font-body text-sm">Unclaimed</p>
-                  <p className="text-3xl font-bold text-primary-hierarchy">{unclaimedLeads}</p>
+                  <p className="text-gray-400 font-body text-sm">Unclaimed</p>
+                  <p className="text-3xl font-bold text-white">{unclaimedLeads}</p>
                 </div>
                 <div className="h-12 w-12 bg-yellow-500/20 rounded-full flex items-center justify-center">
                   <Clock className="h-6 w-6 text-yellow-400" />
@@ -303,87 +225,138 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="bg-black/20 backdrop-blur-xl border-system rounded-3xl">
+          <Card className="bg-black/20 backdrop-blur-xl border-white/10 rounded-xl">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-medium-hierarchy font-body text-sm">Responses</p>
-                  <p className="text-3xl font-bold text-primary-hierarchy">{responsesReceived}</p>
+                  <p className="text-gray-400 font-body text-sm">Dormant</p>
+                  <p className="text-3xl font-bold text-white">{dormantLeads}</p>
                 </div>
-                <div className="h-12 w-12 bg-green-500/20 rounded-full flex items-center justify-center">
-                  <Download className="h-6 w-6 text-green-400" />
+                <div className="h-12 w-12 bg-gray-500/20 rounded-full flex items-center justify-center">
+                  <Clock className="h-6 w-6 text-gray-400" />
                 </div>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex gap-3">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() => setSortByRecent(!sortByRecent)}
-                    variant="outline"
-                    className={`border-system text-medium-hierarchy hover:bg-white/10 rounded-full px-6 backdrop-blur-sm font-body ${
-                      sortByRecent ? "bg-purple-500/10 text-purple-300" : ""
-                    }`}
-                  >
-                    <Clock className="h-4 w-4 mr-2" />
-                    {sortByRecent ? "Recent First" : "Sort by Recent"}
-                    <Info className="h-3 w-3 ml-1 opacity-50" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="bg-black/90 backdrop-blur-xl border-system rounded-2xl">
-                  <p className="font-body">Toggle to show most recently contacted leads first</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+        {leads.length === 0 ? (
+          // Empty state
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.2 }}
+            className="text-center py-16"
+          >
+            <div className="max-w-md mx-auto">
+              <div className="h-24 w-24 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Upload className="h-12 w-12 text-white" />
+              </div>
+              <h3 className="text-xl font-title text-white mb-2">No leads yet</h3>
+              <p className="text-gray-400 font-body mb-6">
+                Get started by importing your CSV file with contact data, or add your first lead manually.
+              </p>
+              <div className="flex gap-3 justify-center">
+                <Button
+                  onClick={() => setIsImportOpen(true)}
+                  className="bg-white text-black hover:bg-gray-100 rounded-lg px-6"
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Import CSV
+                </Button>
+                <Button
+                  onClick={() => setIsAddModalOpen(true)}
+                  variant="outline"
+                  className="border-white/20 text-white hover:bg-white/10 rounded-lg px-6"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Lead
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex gap-3">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        onClick={() => setSortByRecent(!sortByRecent)}
+                        variant="outline"
+                        className={`border-white/20 text-gray-400 hover:bg-white/10 rounded-lg px-6 backdrop-blur-sm font-body ${
+                          sortByRecent ? "bg-white/10 text-white" : ""
+                        }`}
+                      >
+                        <Clock className="h-4 w-4 mr-2" />
+                        {sortByRecent ? "Recent First" : "Sort by Recent"}
+                        <Info className="h-3 w-3 ml-1 opacity-50" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent className="bg-black/90 backdrop-blur-xl border-white/10 rounded-2xl">
+                      <p className="font-body">Toggle to show most recently contacted leads first</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
 
-            <Button
-              onClick={() =>
-                setFilterByOwnership(
-                  filterByOwnership === "all" ? "mine" : filterByOwnership === "mine" ? "unclaimed" : "all",
-                )
-              }
-              variant="outline"
-              className={`border-system text-medium-hierarchy hover:bg-white/10 rounded-full px-6 backdrop-blur-sm font-body ${
-                filterByOwnership !== "all" ? "bg-blue-500/10 text-blue-300" : ""
-              }`}
-            >
-              <Filter className="h-4 w-4 mr-2" />
-              {filterByOwnership === "all" ? "All Leads" : filterByOwnership === "mine" ? "My Leads" : "Unclaimed"}
-            </Button>
-          </div>
+                <Button
+                  onClick={() =>
+                    setFilterByOwnership(
+                      filterByOwnership === "all" ? "mine" : filterByOwnership === "mine" ? "unclaimed" : "all",
+                    )
+                  }
+                  variant="outline"
+                  className={`border-white/20 text-gray-400 hover:bg-white/10 rounded-lg px-6 backdrop-blur-sm font-body ${
+                    filterByOwnership !== "all" ? "bg-white/10 text-white" : ""
+                  }`}
+                >
+                  <Filter className="h-4 w-4 mr-2" />
+                  {filterByOwnership === "all" ? "All Leads" : filterByOwnership === "mine" ? "My Leads" : "Unclaimed"}
+                </Button>
 
-          <div className="flex gap-3">
-            <Button
-              onClick={() => setIsImportOpen(true)}
-              variant="outline"
-              className="border-system text-medium-hierarchy hover:bg-white/10 rounded-full px-6 backdrop-blur-sm font-body"
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              Import CSV
-            </Button>
-            <Button
-              onClick={() => setIsAddModalOpen(true)}
-              className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-full px-6 transition-all duration-200 font-body"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Lead
-            </Button>
-          </div>
-        </div>
+                <Button
+                  onClick={() => setShowDormant(!showDormant)}
+                  variant="outline"
+                  className={`border-white/20 text-gray-400 hover:bg-white/10 rounded-lg px-6 backdrop-blur-sm font-body ${
+                    showDormant ? "bg-white/10 text-white" : ""
+                  }`}
+                >
+                  {showDormant ? <Eye className="h-4 w-4 mr-2" /> : <EyeOff className="h-4 w-4 mr-2" />}
+                  {showDormant ? "Hide Dormant" : "Show Dormant"}
+                </Button>
+              </div>
 
-        <FollowUpPriority leads={filteredLeads} onLeadSelect={handleLeadSelect} />
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => setIsImportOpen(true)}
+                  variant="outline"
+                  className="border-white/20 text-gray-400 hover:bg-white/10 rounded-lg px-6 backdrop-blur-sm font-body"
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Import CSV
+                </Button>
+                <Button
+                  onClick={() => setIsAddModalOpen(true)}
+                  className="bg-white text-black hover:bg-gray-100 rounded-lg px-6 transition-all duration-200 font-body"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Lead
+                </Button>
+              </div>
+            </div>
 
-        <LeadsTable
-          leads={filteredLeads}
-          onLeadUpdate={handleLeadUpdate}
-          onLeadSelect={handleLeadSelect}
-          sortByRecent={sortByRecent}
-        />
+            <FollowUpPriority leads={filteredLeads} onLeadSelect={handleLeadSelect} />
+
+            <LeadsTable
+              leads={filteredLeads}
+              onLeadUpdate={handleLeadUpdate}
+              onLeadSelect={handleLeadSelect}
+              sortByRecent={sortByRecent}
+              showDormant={showDormant}
+            />
+          </>
+        )}
 
         <LeadPanel
           lead={selectedLead}
