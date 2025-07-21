@@ -28,8 +28,9 @@ function DetailedChart({
   currentValue: number
   labels: string[]
 }) {
-  const max = Math.max(...data, 1)
-  const min = Math.min(...data, 0)
+  // After: safe math that prevents NaN
+  const max = Math.max(...data.filter((n) => typeof n === "number"), 1)
+  const min = Math.min(...data.filter((n) => typeof n === "number"), 0)
   const range = max - min || 1
 
   // Calculate trend
@@ -38,9 +39,14 @@ function DetailedChart({
 
   const points = data
     .map((value, index) => {
-      const x = (index / (data.length - 1)) * 100
-      const y = 100 - ((value - min) / range) * 70 // Leave 30% padding (15% top, 15% bottom)
-      return `${x},${y + 15}` // Add 15% top padding
+      // Guard: if data.length === 1, put the point in the middle (x = 50)
+      const x = data.length === 1 ? 50 : (index / Math.max(data.length - 1, 1)) * 100
+
+      // Guard: ensure value is a valid number
+      const safeValue = typeof value === "number" ? value : min
+      const y = 100 - ((safeValue - min) / range) * 70
+
+      return `${x},${y + 15}`
     })
     .join(" ")
 
@@ -86,8 +92,9 @@ function DetailedChart({
 
           {/* Data points */}
           {data.map((value, index) => {
-            const x = (index / (data.length - 1)) * 100
-            const y = 100 - ((value - min) / range) * 70 + 15
+            const x = data.length === 1 ? 50 : (index / Math.max(data.length - 1, 1)) * 100
+            const safeValue = typeof value === "number" ? value : min
+            const y = 100 - ((safeValue - min) / range) * 70 + 15
             return <circle key={index} cx={x} cy={y} r="2" fill={color} className="drop-shadow-sm" />
           })}
         </svg>

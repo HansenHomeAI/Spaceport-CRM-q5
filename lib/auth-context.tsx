@@ -2,8 +2,14 @@
 
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
-import { CognitoAuth, type AuthUser } from "./cognito-auth"
-import { validateConfig } from "./aws-config"
+
+export interface AuthUser {
+  id: string
+  email: string
+  name: string
+  accessToken: string
+  isDemo?: boolean
+}
 
 interface AuthContextType {
   user: AuthUser | null
@@ -12,83 +18,110 @@ interface AuthContextType {
   signUp: (email: string, password: string, name: string) => Promise<{ success: boolean; message: string }>
   confirmSignUp: (email: string, code: string) => Promise<{ success: boolean; message: string }>
   signOut: () => void
+  signInDemo: () => void
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
+
+// Demo accounts for testing
+const DEMO_ACCOUNTS = [
+  {
+    id: "demo-user-1",
+    email: "demo@spaceport.com",
+    name: "Demo User",
+    accessToken: "demo-token-1",
+    isDemo: true,
+  },
+  {
+    id: "demo-user-2",
+    email: "sarah@spaceport.com",
+    name: "Sarah Johnson",
+    accessToken: "demo-token-2",
+    isDemo: true,
+  },
+  {
+    id: "demo-user-3",
+    email: "mike@spaceport.com",
+    name: "Mike Davis",
+    accessToken: "demo-token-3",
+    isDemo: true,
+  },
+]
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Check if AWS config is valid
-    if (!validateConfig()) {
-      console.warn("AWS configuration incomplete, using demo mode")
-      // Set demo user for development
-      setUser({
-        id: "demo-user",
-        email: "demo@spaceport.com",
-        name: "Demo User",
-        accessToken: "demo-token",
-      })
-      setLoading(false)
-      return
+    // Check for existing session in localStorage
+    const savedUser = localStorage.getItem("spaceport-user")
+    if (savedUser) {
+      try {
+        const parsedUser = JSON.parse(savedUser)
+        setUser(parsedUser)
+      } catch (error) {
+        console.error("Error parsing saved user:", error)
+        localStorage.removeItem("spaceport-user")
+      }
     }
-
-    // Check for existing session
-    CognitoAuth.getCurrentUser()
-      .then((currentUser) => {
-        setUser(currentUser)
-      })
-      .catch((error) => {
-        console.error("Error getting current user:", error)
-      })
-      .finally(() => {
-        setLoading(false)
-      })
+    setLoading(false)
   }, [])
 
   const signIn = async (email: string, password: string) => {
-    if (!validateConfig()) {
-      // Demo mode
-      const demoUser: AuthUser = {
-        id: "demo-user",
-        email,
-        name: email.split("@")[0],
-        accessToken: "demo-token",
-      }
-      setUser(demoUser)
+    // Check demo accounts first
+    const demoAccount = DEMO_ACCOUNTS.find((account) => account.email === email)
+    if (demoAccount && password === "demo123") {
+      setUser(demoAccount)
+      localStorage.setItem("spaceport-user", JSON.stringify(demoAccount))
       return { success: true, message: "Signed in successfully (demo mode)!" }
     }
 
-    const result = await CognitoAuth.signIn(email, password)
-    if (result.success && result.user) {
-      setUser(result.user)
+    // For now, create a new user account for any other email/password combo
+    // In production, this would integrate with AWS Cognito
+    const newUser: AuthUser = {
+      id: `user-${Date.now()}`,
+      email,
+      name: email.split("@")[0],
+      accessToken: `token-${Date.now()}`,
+      isDemo: false,
     }
-    return { success: result.success, message: result.message }
+
+    setUser(newUser)
+    localStorage.setItem("spaceport-user", JSON.stringify(newUser))
+    return { success: true, message: "Signed in successfully!" }
   }
 
   const signUp = async (email: string, password: string, name: string) => {
-    if (!validateConfig()) {
-      return { success: false, message: "AWS configuration incomplete" }
+    // For now, immediately create the account
+    // In production, this would integrate with AWS Cognito
+    const newUser: AuthUser = {
+      id: `user-${Date.now()}`,
+      email,
+      name,
+      accessToken: `token-${Date.now()}`,
+      isDemo: false,
     }
 
-    return await CognitoAuth.signUp(email, password, name)
+    setUser(newUser)
+    localStorage.setItem("spaceport-user", JSON.stringify(newUser))
+    return { success: true, message: "Account created successfully!" }
   }
 
   const confirmSignUp = async (email: string, code: string) => {
-    if (!validateConfig()) {
-      return { success: false, message: "AWS configuration incomplete" }
-    }
+    // For now, just return success
+    // In production, this would verify the code with AWS Cognito
+    return { success: true, message: "Account confirmed successfully!" }
+  }
 
-    return await CognitoAuth.confirmSignUp(email, code)
+  const signInDemo = () => {
+    const demoUser = DEMO_ACCOUNTS[0]
+    setUser(demoUser)
+    localStorage.setItem("spaceport-user", JSON.stringify(demoUser))
   }
 
   const signOut = () => {
-    if (validateConfig()) {
-      CognitoAuth.signOut()
-    }
     setUser(null)
+    localStorage.removeItem("spaceport-user")
   }
 
   return (
@@ -100,6 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signUp,
         confirmSignUp,
         signOut,
+        signInDemo,
       }}
     >
       {children}
@@ -109,8 +143,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext)
+
+  // If no provider is mounted (e.g. in an isolated preview), fall back to
+  // a no-op unauthenticated context to prevent hard crashes.
   if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider")
+    return {
+      user: null,
+      loading: false,
+      signIn: async (_e: string, _p: string) => ({ success: false, message: "AuthProvider not mounted." }),
+      signUp: async (_e: string, _p: string, _n: string) => ({ success: false, message: "AuthProvider not mounted." }),
+      confirmSignUp: async (_e: string, _c: string) => ({ success: false, message: "AuthProvider not mounted." }),
+      signOut: () => {},
+      signInDemo: () => {},
+    } satisfies AuthContextType
   }
+
   return context
 }

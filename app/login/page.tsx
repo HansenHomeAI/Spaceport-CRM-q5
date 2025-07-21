@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -10,17 +9,16 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, Rocket } from "lucide-react"
+import { Separator } from "@/components/ui/separator"
+import { Loader2, Rocket, Play } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 
 export default function LoginPage() {
   const router = useRouter()
-  const { signIn, signUp, confirmSignUp } = useAuth()
+  const { signIn, signUp, signInDemo } = useAuth()
 
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
-  const [showConfirmation, setShowConfirmation] = useState(false)
-  const [pendingEmail, setPendingEmail] = useState("")
 
   const [signInForm, setSignInForm] = useState({
     email: "",
@@ -32,10 +30,6 @@ export default function LoginPage() {
     email: "",
     password: "",
     confirmPassword: "",
-  })
-
-  const [confirmationForm, setConfirmationForm] = useState({
-    code: "",
   })
 
   const handleSignIn = async (e: React.FormEvent) => {
@@ -70,8 +64,8 @@ export default function LoginPage() {
       return
     }
 
-    if (signUpForm.password.length < 8) {
-      setMessage({ type: "error", text: "Password must be at least 8 characters long" })
+    if (signUpForm.password.length < 6) {
+      setMessage({ type: "error", text: "Password must be at least 6 characters long" })
       setIsLoading(false)
       return
     }
@@ -81,8 +75,7 @@ export default function LoginPage() {
 
       if (result.success) {
         setMessage({ type: "success", text: result.message })
-        setPendingEmail(signUpForm.email)
-        setShowConfirmation(true)
+        router.push("/dashboard")
       } else {
         setMessage({ type: "error", text: result.message })
       }
@@ -93,206 +86,180 @@ export default function LoginPage() {
     }
   }
 
-  const handleConfirmSignUp = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    setMessage(null)
-
-    try {
-      const result = await confirmSignUp(pendingEmail, confirmationForm.code)
-
-      if (result.success) {
-        setMessage({ type: "success", text: result.message })
-        setShowConfirmation(false)
-        // Auto-switch to sign in tab
-        setTimeout(() => {
-          setMessage(null)
-        }, 3000)
-      } else {
-        setMessage({ type: "error", text: result.message })
-      }
-    } catch (error) {
-      setMessage({ type: "error", text: "An unexpected error occurred" })
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  if (showConfirmation) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
-              <Rocket className="h-6 w-6 text-blue-600" />
-            </div>
-            <CardTitle>Confirm Your Account</CardTitle>
-            <CardDescription>We've sent a verification code to {pendingEmail}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleConfirmSignUp} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="code">Verification Code</Label>
-                <Input
-                  id="code"
-                  type="text"
-                  placeholder="Enter 6-digit code"
-                  value={confirmationForm.code}
-                  onChange={(e) => setConfirmationForm({ code: e.target.value })}
-                  required
-                  maxLength={6}
-                />
-              </div>
-
-              {message && (
-                <Alert
-                  className={message.type === "error" ? "border-red-200 bg-red-50" : "border-green-200 bg-green-50"}
-                >
-                  <AlertDescription className={message.type === "error" ? "text-red-800" : "text-green-800"}>
-                    {message.text}
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Confirm Account
-              </Button>
-
-              <Button type="button" variant="ghost" className="w-full" onClick={() => setShowConfirmation(false)}>
-                Back to Sign Up
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    )
+  const handleDemoSignIn = () => {
+    signInDemo()
+    router.push("/dashboard")
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <Card className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center bg-black p-4">
+      <Card className="w-full max-w-md bg-black/90 backdrop-blur-xl border-white/10 rounded-3xl">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
-            <Rocket className="h-6 w-6 text-blue-600" />
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-purple-500/20">
+            <Rocket className="h-6 w-6 text-purple-400" />
           </div>
-          <CardTitle>Spaceport CRM</CardTitle>
-          <CardDescription>Sign in to your account or create a new one</CardDescription>
+          <CardTitle className="text-white">Spaceport CRM</CardTitle>
+          <CardDescription className="text-gray-400">Sign in to your account or create a new one</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
+          {/* Demo Account Button */}
+          <Button
+            onClick={handleDemoSignIn}
+            className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-full"
+          >
+            <Play className="mr-2 h-4 w-4" />
+            Try Demo Account
+          </Button>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <Separator className="w-full bg-white/10" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-black px-2 text-gray-400">Or continue with</span>
+            </div>
+          </div>
+
           <Tabs defaultValue="signin" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="signin">Sign In</TabsTrigger>
-              <TabsTrigger value="signup">Sign Up</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-2 bg-white/5">
+              <TabsTrigger value="signin" className="text-gray-300 data-[state=active]:text-white">
+                Sign In
+              </TabsTrigger>
+              <TabsTrigger value="signup" className="text-gray-300 data-[state=active]:text-white">
+                Sign Up
+              </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="signin">
+            <TabsContent value="signin" className="mt-4">
               <form onSubmit={handleSignIn} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="signin-email">Email</Label>
+                  <Label htmlFor="signin-email" className="text-white">
+                    Email
+                  </Label>
                   <Input
                     id="signin-email"
                     type="email"
                     placeholder="Enter your email"
                     value={signInForm.email}
                     onChange={(e) => setSignInForm({ ...signInForm, email: e.target.value })}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
                     required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="signin-password">Password</Label>
+                  <Label htmlFor="signin-password" className="text-white">
+                    Password
+                  </Label>
                   <Input
                     id="signin-password"
                     type="password"
                     placeholder="Enter your password"
                     value={signInForm.password}
                     onChange={(e) => setSignInForm({ ...signInForm, password: e.target.value })}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
                     required
                   />
                 </div>
 
-                {message && (
-                  <Alert
-                    className={message.type === "error" ? "border-red-200 bg-red-50" : "border-green-200 bg-green-50"}
-                  >
-                    <AlertDescription className={message.type === "error" ? "text-red-800" : "text-green-800"}>
-                      {message.text}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                <Button type="submit" className="w-full" disabled={isLoading}>
+                <Button
+                  type="submit"
+                  className="w-full bg-white/10 hover:bg-white/20 text-white rounded-full"
+                  disabled={isLoading}
+                >
                   {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Sign In
                 </Button>
               </form>
+
+              <div className="mt-4 text-xs text-gray-500">
+                <strong>Demo accounts:</strong>
+                <ul className="mt-1 space-y-1">
+                  <li>• demo@spaceport.com / demo123</li>
+                  <li>• sarah@spaceport.com / demo123</li>
+                  <li>• mike@spaceport.com / demo123</li>
+                </ul>
+              </div>
             </TabsContent>
 
-            <TabsContent value="signup">
+            <TabsContent value="signup" className="mt-4">
               <form onSubmit={handleSignUp} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="signup-name">Full Name</Label>
+                  <Label htmlFor="signup-name" className="text-white">
+                    Full Name
+                  </Label>
                   <Input
                     id="signup-name"
                     type="text"
                     placeholder="Enter your full name"
                     value={signUpForm.name}
                     onChange={(e) => setSignUpForm({ ...signUpForm, name: e.target.value })}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
                     required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="signup-email">Email</Label>
+                  <Label htmlFor="signup-email" className="text-white">
+                    Email
+                  </Label>
                   <Input
                     id="signup-email"
                     type="email"
                     placeholder="Enter your email"
                     value={signUpForm.email}
                     onChange={(e) => setSignUpForm({ ...signUpForm, email: e.target.value })}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
                     required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="signup-password">Password</Label>
+                  <Label htmlFor="signup-password" className="text-white">
+                    Password
+                  </Label>
                   <Input
                     id="signup-password"
                     type="password"
-                    placeholder="Enter your password (min 8 characters)"
+                    placeholder="Enter your password (min 6 characters)"
                     value={signUpForm.password}
                     onChange={(e) => setSignUpForm({ ...signUpForm, password: e.target.value })}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
                     required
-                    minLength={8}
+                    minLength={6}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="signup-confirm-password">Confirm Password</Label>
+                  <Label htmlFor="signup-confirm-password" className="text-white">
+                    Confirm Password
+                  </Label>
                   <Input
                     id="signup-confirm-password"
                     type="password"
                     placeholder="Confirm your password"
                     value={signUpForm.confirmPassword}
                     onChange={(e) => setSignUpForm({ ...signUpForm, confirmPassword: e.target.value })}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 rounded-full"
                     required
                   />
                 </div>
 
-                {message && (
-                  <Alert
-                    className={message.type === "error" ? "border-red-200 bg-red-50" : "border-green-200 bg-green-50"}
-                  >
-                    <AlertDescription className={message.type === "error" ? "text-red-800" : "text-green-800"}>
-                      {message.text}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                <Button type="submit" className="w-full" disabled={isLoading}>
+                <Button
+                  type="submit"
+                  className="w-full bg-white/10 hover:bg-white/20 text-white rounded-full"
+                  disabled={isLoading}
+                >
                   {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Create Account
                 </Button>
               </form>
             </TabsContent>
           </Tabs>
+
+          {message && (
+            <Alert className={message.type === "error" ? "border-red-200 bg-red-50" : "border-green-200 bg-green-50"}>
+              <AlertDescription className={message.type === "error" ? "text-red-800" : "text-green-800"}>
+                {message.text}
+              </AlertDescription>
+            </Alert>
+          )}
         </CardContent>
       </Card>
     </div>
